@@ -11,30 +11,52 @@
 #include "driver/spi_master.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
-#include "InfoNES_System.h"
-#include "InfoNES.h"
 #include "st7789.h"
 #include "st7789_faster.h"
 
 static const char *MAIN_LOG = "MAIN_LOG";
 
-//_Noreturn void taskInfoNES(void *pvParam)
-//{
-//
-//
-//    while (1)
-//    {
-//        while (1)
-//        {
-//            vTaskDelay(1);
-//
-//
-//        }
-//    }
-//}
+TFT_t dev;
 
-//不知道为什么，这么写会崩溃。。。但是用malloc却没事。
-//spi_transaction_t p_spi_transaction_pool[240];
+
+//Transfer GuiLite 32 bits color to your LCD color
+#define GL_RGB_32_to_16(rgb) (((((unsigned int)(rgb)) & 0xFF) >> 3) | ((((unsigned int)(rgb)) & 0xFC00) >> 5) | ((((unsigned int)(rgb)) & 0xF80000) >> 8))
+#define FLIPW(h) ((((uint16_t)(h) << 8)&0xFF00) | ((uint16_t)(h) >> 8))
+
+
+void gfx_fill_rect(int x0, int y0, int x1, int y1, unsigned int rgb) {
+
+}
+
+
+//UI entry
+struct DISPLAY_DRIVER {
+    void (*draw_pixel)(int x, int y, unsigned int rgb);
+
+    void (*fill_rect)(int x0, int y0, int x1, int y1, unsigned int rgb);
+} my_driver;
+
+extern void startHello3Dwave(void *phy_fb, int width, int height, int color_bytes, struct DISPLAY_DRIVER *driver);
+extern void setping();
+
+void delay_ms(unsigned int nms) {
+    ESP_LOGI("GUI", "%d",nms);
+    vTaskDelay(nms / portTICK_PERIOD_MS);
+}
+
+
+uint16_t WorkFrame[240 * 320];
+
+//Encapsulate your LCD driver:
+void gfx_draw_pixel(int x, int y, unsigned int rgb) {
+//    lcdDrawPixel(&dev, x, y, GL_RGB_32_to_16(rgb));
+    WorkFrame[x + y * 240] = (uint16_t) FLIPW(GL_RGB_32_to_16(rgb));
+
+}
+void taskGUI() {
+
+};
+
 
 spi_transaction_t *p_spi_transaction_pool;
 
@@ -44,46 +66,36 @@ void initSpiTransactionPool() {
     p_spi_transaction_pool = pVoid;
     for (int i = 0; i < 240; i += 1) {
         p_spi_transaction_pool[i].length = CONFIG_WIDTH * 2 * 8;
-        p_spi_transaction_pool[i].tx_buffer = &WorkFrame[i * (NES_DISP_WIDTH) + 8];
+        p_spi_transaction_pool[i].tx_buffer = &WorkFrame[i * (CONFIG_WIDTH)];
     }
 }
 
 _Noreturn void taskLCD(void *param) {
-//    void *pVoid = malloc(80000);
-//    ((uint8_t *)pVoid)[80000-1]=22;
-    InfoNES_Load(NULL);
-    InfoNES_Init();
-    FrameSkip++;
-    TFT_t dev;
+
 
     spi_master_init(&dev, CONFIG_MOSI_GPIO, CONFIG_SCLK_GPIO, CONFIG_CS_GPIO, CONFIG_DC_GPIO, CONFIG_RESET_GPIO,
                     CONFIG_BL_GPIO);
     lcdInit(&dev, CONFIG_WIDTH, CONFIG_HEIGHT, CONFIG_OFFSETX, CONFIG_OFFSETY);
     initSpiTransactionPool();
-    int64_t time_fps_last = esp_timer_get_time();
+
+    my_driver.draw_pixel = gfx_draw_pixel;
+    my_driver.fill_rect = NULL;//gfx_fill_rect;
+    startHello3Dwave(NULL, 240, 320, 2, &my_driver);
+
+
+    memset(WorkFrame, 0, 240 * 240 * 2);
+
     while (1) {
-        static uint8_t fps_count = 0;
-        fps_count++;
-        if (fps_count == 0) {
-            int64_t time_fps_current = esp_timer_get_time();
-            ESP_LOGI(MAIN_LOG, "fps:%lf\n", 256.0 / ((time_fps_current - time_fps_last) / 1000000.0));
-            time_fps_last = time_fps_current;
-        }
+        setping();
+
         lcdPrepareMultiPixels(&dev);
-        for (int i = 0; i < NES_DISP_HEIGHT; i += 1) {
+        for (int i = 0; i < 240; i += 1) {
             spi_device_queue_trans(dev._SPIHandle, &p_spi_transaction_pool[i], portMAX_DELAY);
         }
-//        int64_t t_nes_start = esp_timer_get_time();
-        InfoNES_Cycle();
-//        int64_t t_nes_end = esp_timer_get_time();
+
         spi_transaction_t *r_trans;
-        for (int i = 0; i < NES_DISP_HEIGHT; i += 1) {
+        for (int i = 0; i < 240; i += 1) {
             spi_device_get_trans_result(dev._SPIHandle, &r_trans, portMAX_DELAY);
-        }
-//        ESP_LOGI(MAIN_LOG, "nes:%lld ms\n", (t_nes_end - t_nes_start) / 1000);
-
-        if (fps_count == 0) {
-
         }
     }
 }
